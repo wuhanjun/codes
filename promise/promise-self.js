@@ -46,54 +46,28 @@ class Promise {
     // 将所有then中的方法放到setTimeout的原因是：这些方法默认要异步执行。例子见./cases/async-then-fn.html
 
     const promise2 = new Promise((resolve, reject) => {
+      const asyncHandle = (handle) => {
+        setTimeout(() => {
+          try {
+            // 这里拿到返回值，是为了then的链式调用。之前then中的return值作为下一个then的入参
+            const x = handle()
+            // resolve(x) 不能简单用resolve，是因为有可能返回的是一个promise实例，所以我们需要判定。
+            // 按规范需要等该promise实例的状态转为fulfilled或者rejected，才能进入下一个then
+            // 有人会问，我不能直接返回一个promise值吗？
+            // 可以呀，没人拦着你，但是规范中要求的是刚刚描述的，在实际生产中确实也好用。
+            this.resolvePromise(promise2, x, resolve, reject)
+          } catch (e) {
+            reject(e)
+          }
+        })
+      }
+
       if (this.status === STATUS_PENDING) {
-        this.resolvedCallbacks.push(() => {
-          setTimeout(() => {
-            try {
-              // 这里拿到返回值，是为了then的链式调用。之前then中的return值作为下一个then的入参
-              const x = onFulfilled(this.value)
-              // resolve(x) 不能简单用resolve，是因为有可能返回的是一个promise实例，所以我们需要判定。
-              // 按规范需要等该promise实例的状态转为fulfilled或者rejected，才能进入下一个then
-              // 有人会问，我不能直接返回一个promise值吗？
-              // 可以呀，没人拦着你，但是规范中要求的是刚刚描述的，在实际生产中确实也好用。
-              this.resolvePromise(promise2, x, resolve, reject)
-            } catch (e) {
-              reject(e)
-            }
-          })
-        })
-        this.rejectedCallbacks.push(() => {
-          setTimeout(() => {
-            try {
-              const x = onRejected(this.reason)
-              this.resolvePromise(promise2, x, resolve, reject)
-            } catch (e) {
-              reject(e)
-            }
-          })
-        })
+        this.resolvedCallbacks.push(() => asyncHandle(() => onFulfilled(this.value)))
+        this.rejectedCallbacks.push(() => asyncHandle(() => onRejected(this.reason)))
       }
-      if (this.status === STATUS_FULFILLED) {
-        setTimeout(() => {
-          try {
-            const x = onFulfilled(this.value)
-            this.resolvePromise(promise2, x, resolve, reject)
-          } catch (e) {
-            reject(e)
-          }
-        })
-      }
-      if (this.status === STATUS_REJECTED) {
-        setTimeout(() => {
-          try {
-            const x = onRejected(this.reason)
-            // 这里的resolv统一翻译为解析
-            this.resolvePromise(promise2, x, resolve, reject)
-          } catch (e) {
-            reject(e)
-          }
-        })
-      }
+      if (this.status === STATUS_FULFILLED) asyncHandle(() => onFulfilled(this.value))
+      if (this.status === STATUS_REJECTED) asyncHandle(() => onRejected(this.reason))
     })
     return promise2
   }
@@ -129,7 +103,8 @@ class Promise {
         let then = x.then // 为什么必须把x.then的引用存储到变量上？
         // 按文档中说的，如果下面也是用x.then的方式引用的话，其值容易改变。但是这代码是同步的，怎么会被改变呢？
         if (typeof then === 'function') {
-          then.call(x,
+          then.call(
+            x,
             (y) => {
               if (isCalled) return
               isCalled = true
@@ -190,7 +165,7 @@ class Promise {
       // 是因为var a = []; a[5] = 1 // a.length === 6
       let counter = 0
       let result = []
-      let len = promises.length
+      const len = promises.length
 
       function processData (data, i) {
         result[i] = data
